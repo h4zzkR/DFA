@@ -7,3 +7,4 @@ Abstract automata (NFA/DFA) pure C++ implementation. Supported features like eps
 ## TODOs
   - epsilon elimination
   - std::hash instead custom-make hash
+  - nice-looking comments with logic explained
