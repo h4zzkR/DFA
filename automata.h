@@ -57,12 +57,22 @@ public:
         return number_of_states - 1;
     }
 
-    void add_transition(size_t from, T label, size_t to, bool is_terminal = false) {
+    void add_transition(size_t from, T label, size_t to, bool is_terminal = false, bool check = true) {
         try {
             auto tr = Transition(label, label == epsilon_transition_symbol);
             states.at(from).transitions.insert({tr, to});
             states.at(to).is_terminal |= is_terminal;
-            alphabet.insert(label);
+            if (check)
+                alphabet.insert(label);
+        } catch (const std::out_of_range& e) {
+            std::cout << "ERR: Add state before using it\n";
+        }
+    }
+
+    void drop_transition(size_t from, T label, size_t to) {
+        try {
+            auto tr = Transition(label, label == epsilon_transition_symbol);
+            states.at(from).transitions.remove({tr, to});
         } catch (const std::out_of_range& e) {
             std::cout << "ERR: Add state before using it\n";
         }
@@ -125,6 +135,42 @@ public:
         *this = std::move(dfa);
     }
 
+    void dfs_(std::set<size_t>& closure, size_t v) {
+        closure.insert(v);
+        for (auto& [label, state] : states[v].transitions) {
+            if (!closure.count(state) && label == epsilon_transition_symbol) {
+                dfs_(closure, state);
+            }
+        }
+    }
+
+    void dfs(std::set<size_t>& closure, size_t v) {
+//        dfs_labels.reserve(number_of_states);
+        dfs_(closure, v);
+    }
+
+    void eps_elimination() {
+//        std::set<size_t> closure; dfs(closure, v);
+        for (auto& state : states) {
+            // find transitive closure
+            std::set<size_t> closure;
+            dfs(closure, state.id); // if IS POSITION in states <TODO>
+            for (size_t v : closure) {
+                for (auto& [label, to] : states[v].transitions) {
+                    add_transition(state.id, label, to, false, false);
+                }
+            }
+        }
+
+        for (auto& state : states) {
+            for (auto& [label, to] : state.transitions) {
+                if (label == epsilon_transition_symbol)
+                    drop_transition(state.id, label, to);
+            }
+        }
+
+    }
+
     /* TRAVERSING */
 
     template <typename IterType>
@@ -180,6 +226,7 @@ private:
 
     std::set<T> alphabet;
     std::vector<State> states;
+//    std::vector<size_t> dfs_labels;
 
 };
 
