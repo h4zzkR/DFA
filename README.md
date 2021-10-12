@@ -5,5 +5,7 @@ Abstract automata (NFA/DFA) pure C++ implementation. Supported features like eps
   - thompson algorithm implemented, tested on some example
   
 ## TODOs
-  - epsilon elimination
+  - ~~epsilon elimination~~
   - std::hash instead custom-make hash
+  - nice-looking comments with logic explained
+  - test base algorithms on some examples

@@ -1,7 +1,6 @@
 //
 // Created by h4zzkr on 03.10.2021.
 //
-
 #ifndef PROJECT_Automata_AUTOMATA_H
 #define PROJECT_Automata_AUTOMATA_H
 
@@ -29,9 +28,9 @@ namespace automata_stuff {
 template<typename T=char>
 class Automata {
 public:
-    explicit Automata(T epsilon_symbol, size_t initial_id = 0): epsilon_transition_symbol(epsilon_symbol) {
-        initial_state = initial_id;
-        states.emplace_back(initial_id);
+    explicit Automata(T epsilon_symbol): epsilon_transition_symbol(epsilon_symbol) {
+        initial_state = 0;
+        states.emplace_back(0);
     }
 
     explicit Automata(size_t states_cnt) {
@@ -59,20 +58,11 @@ public:
 
     void add_transition(size_t from, T label, size_t to, bool is_terminal = false, bool check = true) {
         try {
-            auto tr = Transition(label, label == epsilon_transition_symbol);
+            auto tr = Transition(label);
             states.at(from).transitions.insert({tr, to});
             states.at(to).is_terminal |= is_terminal;
             if (check)
                 alphabet.insert(label);
-        } catch (const std::out_of_range& e) {
-            std::cout << "ERR: Add state before using it\n";
-        }
-    }
-
-    void drop_transition(size_t from, T label, size_t to) {
-        try {
-            auto tr = Transition(label, label == epsilon_transition_symbol);
-            states.at(from).transitions.remove({tr, to});
         } catch (const std::out_of_range& e) {
             std::cout << "ERR: Add state before using it\n";
         }
@@ -84,7 +74,11 @@ public:
 
     /* AUTOMATA TRANSFORMATIONS */
 
+    // https://neerc.ifmo.ru/wiki/index.php?title=Построение_по_НКА_эквивалентного_ДКА,_алгоритм_Томпсона
     void thompson_nfa2dfa() {
+
+        epsilon_edges_elimination();
+
         std::queue<std::pair<size_t, std::set<size_t>>> Q;
         Automata<T> dfa(epsilon_transition_symbol);
         std::unordered_map<size_t, size_t> tracking_q;
@@ -135,37 +129,28 @@ public:
         *this = std::move(dfa);
     }
 
-    void dfs_(std::set<size_t>& closure, size_t v) {
-        closure.insert(v);
-        for (auto& [label, state] : states[v].transitions) {
-            if (!closure.count(state) && label == epsilon_transition_symbol) {
-                dfs_(closure, state);
-            }
-        }
-    }
-
-    void dfs(std::set<size_t>& closure, size_t v) {
-//        dfs_labels.reserve(number_of_states);
-        dfs_(closure, v);
-    }
-
-    void eps_elimination() {
-//        std::set<size_t> closure; dfs(closure, v);
+    // https://neerc.ifmo.ru/wiki/index.php?title=Автоматы_с_eps-переходами._Eps-замыкание
+    void epsilon_edges_elimination() {
         for (auto& state : states) {
             // find transitive closure
             std::set<size_t> closure;
-            dfs(closure, state.id); // if IS POSITION in states <TODO>
+            dfs(closure, state.id); // if state id IS POSITION <TODO>
             for (size_t v : closure) {
-                for (auto& [label, to] : states[v].transitions) {
-                    add_transition(state.id, label, to, false, false);
+                for (T label : alphabet) {
+                    auto range = states[v].transitions.equal_range(Transition(label));
+                    for (auto to = range.first; to != range.second; ++to) {
+                        add_transition(state.id, label, to->second, false, false);
+                    }
                 }
             }
         }
 
         for (auto& state : states) {
-            for (auto& [label, to] : state.transitions) {
-                if (label == epsilon_transition_symbol)
-                    drop_transition(state.id, label, to);
+            auto range = state.transitions.equal_range(Transition(epsilon_transition_symbol));
+            auto to = range.first;
+            while (to != range.second) {
+                auto prey = to; ++to; // anti-invalidation
+                state.transitions.erase(prey);
             }
         }
 
@@ -198,10 +183,24 @@ public:
 
 private:
 
+    void dfs_(std::set<size_t>& closure, size_t v) {
+        closure.insert(v);
+        for (auto& [label, state] : states[v].transitions) {
+            if (!closure.count(state) && label.label == epsilon_transition_symbol) {
+                dfs_(closure, state);
+            }
+        }
+    }
+
+    void dfs(std::set<size_t>& closure, size_t v) {
+        dfs_(closure, v);
+        closure.erase(v); // remove self
+    }
+
+
     struct Transition {
         T label;
-        bool is_epsilon = false;
-        explicit Transition(T label = T(), bool is_epsilon = false): label(label), is_epsilon(is_epsilon) {}
+        explicit Transition(T label = T()): label(label) {}
     };
 
     struct cmp {
@@ -226,11 +225,7 @@ private:
 
     std::set<T> alphabet;
     std::vector<State> states;
-//    std::vector<size_t> dfs_labels;
 
 };
-
-
-
 
 #endif //PROJECT_Automata_AUTOMATA_H
