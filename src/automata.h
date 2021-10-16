@@ -1,7 +1,6 @@
 //
 // Created by h4zzkr on 03.10.2021.
 //
-
 #ifndef PROJECT_Automata_AUTOMATA_H
 #define PROJECT_Automata_AUTOMATA_H
 
@@ -11,7 +10,10 @@
 #include <map>
 #include <queue>
 #include <unordered_set>
+#include <unordered_map>
 #include <functional>
+#include <iostream>
+#include <stdexcept>
 #include <set>
 
 namespace automata_stuff {
@@ -29,9 +31,9 @@ namespace automata_stuff {
 template<typename T=char>
 class Automata {
 public:
-    explicit Automata(T epsilon_symbol, size_t initial_id = 0): epsilon_transition_symbol(epsilon_symbol) {
-        initial_state = initial_id;
-        states.emplace_back(initial_id);
+    explicit Automata(T epsilon_symbol): epsilon_transition_symbol(epsilon_symbol) {
+        initial_state = 0;
+        states.emplace_back(0, false, false);
     }
 
     explicit Automata(size_t states_cnt) {
@@ -57,15 +59,39 @@ public:
         return number_of_states - 1;
     }
 
-    void add_transition(size_t from, T label, size_t to, bool is_terminal = false) {
-        try {
-            auto tr = Transition(label, label == epsilon_transition_symbol);
-            states.at(from).transitions.insert({tr, to});
-            states.at(to).is_terminal |= is_terminal;
-            alphabet.insert(label);
-        } catch (const std::out_of_range& e) {
-            std::cout << "ERR: Add state before using it\n";
+    void add_transition(size_t from, T label, size_t to, bool is_terminal = false, bool check = true, bool quiet=true) {
+        auto tr = Transition(label);
+
+        if (!quiet or from >= number_of_states) {
+            throw std::out_of_range("ERR: Add state before using it\n");
+        } else {
+            if (to >= number_of_states) {
+                size_t npos = add_state(is_terminal);
+                state_labels.insert({to, npos});
+            }
         }
+
+        states.at(at(to)).is_terminal |= is_terminal;
+        states.at(from).transitions.insert({tr, at(to)});
+        alphabet.insert(label);
+    }
+
+    void toggle_terminal(size_t state) {
+        states.at(state).is_terminal ^= true;
+    }
+
+    void drop_transition(size_t from, T label, size_t to) {
+        auto range = states[from].transitions.equal_range(Transition(label));
+        for (auto i = range.first; i != range.second; ++i) {
+            if (states[i->second].id == to) {
+                states[from].transitions.erase(i);
+                break;
+            }
+        }
+    }
+
+    bool read_string(std::string word="only_for_testing") {
+        return read_expression(word.begin(), word.end());
     }
 
     size_t begin() {
@@ -74,7 +100,11 @@ public:
 
     /* AUTOMATA TRANSFORMATIONS */
 
+    // https://neerc.ifmo.ru/wiki/index.php?title=Построение_по_НКА_эквивалентного_ДКА,_алгоритм_Томпсона
     void thompson_nfa2dfa() {
+
+        epsilon_edges_elimination();
+
         std::queue<std::pair<size_t, std::set<size_t>>> Q;
         Automata<T> dfa(epsilon_transition_symbol);
         std::unordered_map<size_t, size_t> tracking_q;
@@ -101,7 +131,6 @@ public:
                             is_terminal = true;
                         to_vset.insert(i->second);
                     }
-
                 }
 
                 if (to_vset.empty()) continue;
@@ -125,19 +154,48 @@ public:
         *this = std::move(dfa);
     }
 
+    // https://neerc.ifmo.ru/wiki/index.php?title=Автоматы_с_eps-переходами._Eps-замыкание
+    void epsilon_edges_elimination() {
+        for (auto& state : states) {
+            // find transitive closure
+            std::set<size_t> closure;
+            dfs(closure, state.id); // if state id IS POSITION <TODO>
+            for (size_t v : closure) {
+                for (T label : alphabet) {
+                    auto range = states[v].transitions.equal_range(Transition(label));
+                    for (auto to = range.first; to != range.second; ++to) {
+                        add_transition(state.id, label, to->second, false, false);
+                    }
+                }
+            }
+        }
+
+        // drop epsilon transitions
+        for (auto& state : states) {
+            auto range = state.transitions.equal_range(Transition(epsilon_transition_symbol));
+            auto to = range.first;
+            bool is_state_starting = (state.id == initial_state);
+            while (to != range.second) {
+                auto prey = to; ++to; // anti-invalidation
+                state.transitions.erase(prey);
+            }
+        }
+
+    }
+
     /* TRAVERSING */
 
     template <typename IterType>
     bool read_expression(IterType iter, IterType end) {
+        bool read_state = false;
         while (iter != end) {
             auto info = step(*iter);
-            if (info.first == -1)
-                return false;
-            if (info.second == 1)
-                return true;
+            read_state = info.second;
             ++iter;
         }
-        return false;
+        current_state_id = 0;
+
+        return read_state;
     }
 
     std::pair<int,bool> step(T label) {
@@ -150,12 +208,41 @@ public:
         }
     }
 
+    /* Get pos of real-labeled and fake-labeld states */
+    size_t at(size_t pos) {
+        size_t real_pos;
+        if (pos < number_of_states)
+            real_pos = pos;
+        else {
+            try {
+                real_pos = state_labels.at(pos);
+            } catch (const std::out_of_range& e) {
+                std::cout << "ERR: Add state before using it\n";
+            }
+        }
+        return real_pos;
+    }
+
 private:
+
+    void dfs_(std::set<size_t>& closure, size_t v) {
+        closure.insert(v);
+        for (auto& [label, state] : states[v].transitions) {
+            if (!closure.count(state) && label.label == epsilon_transition_symbol) {
+                dfs_(closure, state);
+            }
+        }
+    }
+
+    void dfs(std::set<size_t>& closure, size_t v) {
+        dfs_(closure, v);
+        closure.erase(v); // remove self
+    }
+
 
     struct Transition {
         T label;
-        bool is_epsilon = false;
-        explicit Transition(T label = T(), bool is_epsilon = false): label(label), is_epsilon(is_epsilon) {}
+        explicit Transition(T label = T()): label(label) {}
     };
 
     struct cmp {
@@ -166,9 +253,11 @@ private:
 
     struct State {
         size_t id;
+        bool is_initial  = false;
         bool is_terminal = false;
         std::multimap<Transition, size_t, cmp> transitions;
-        State(size_t id = 0, bool is_terminal = false): id(id), is_terminal(is_terminal) {}
+        State(size_t id = 0, bool is_terminal = false, bool is_initial = false): id(id),
+                    is_terminal(is_terminal), is_initial(is_initial) {}
     };
 
 
@@ -179,11 +268,9 @@ private:
     size_t initial_state = 0;
 
     std::set<T> alphabet;
+    std::map<size_t, size_t> state_labels;
     std::vector<State> states;
 
 };
-
-
-
 
 #endif //PROJECT_Automata_AUTOMATA_H
